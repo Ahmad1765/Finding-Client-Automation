@@ -59,7 +59,7 @@ def find_places_free(city, business_type):
     req = urllib.request.Request(url, data=data)
     
     try:
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=25) as response:
             res = json.loads(response.read().decode('utf-8'))
             places = []
             for el in res.get('elements', []):
@@ -142,7 +142,7 @@ def generate_personalized_email(business_name, website_url, website_text, missin
     
     try:
         req = urllib.request.Request(url, data=payload, headers=headers)
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=15) as response:
             data = json.loads(response.read())
             return data['choices'][0]['message']['content'].strip()
     except Exception as e:

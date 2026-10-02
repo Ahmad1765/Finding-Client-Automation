@@ -15,13 +15,25 @@ from email.message import EmailMessage
 # ==========================================
 # CONFIGURATION
 # ==========================================
-# GOOGLE_API_KEY is no longer needed! We are using OpenStreetMap (Overpass API) which is 100% free.
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "YOUR_GROQ_API_KEY")
+# ponytail: stdlib .env loader (avoids third-party dependencies)
+env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(env_path):
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                k_clean = k.strip()
+                v_clean = v.strip().strip("'\"")
+                os.environ.setdefault(k_clean, v_clean)
+                os.environ.setdefault(k_clean.upper(), v_clean)
+
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or os.environ.get("GROQ", "")
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-SMTP_USER = os.environ.get("SMTP_USER", "your_email@gmail.com")
-SMTP_PASS = os.environ.get("SMTP_PASS", "your_app_password").replace(" ", "") # Strip spaces from app password
+SMTP_USER = os.environ.get("SMTP_USER") or os.environ.get("GMAILUSER", "")
+SMTP_PASS = (os.environ.get("SMTP_PASS") or os.environ.get("GMAILSMTP", "")).replace(" ", "")
 
 def find_places_free(city, business_type):
     """Finds businesses using the free Overpass API (OpenStreetMap). No API key required!"""

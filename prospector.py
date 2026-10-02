@@ -78,16 +78,33 @@ def find_places_free(city, business_type):
         print(f"Error fetching free places: {e}")
         return []
 
+_orig_getaddrinfo = socket.getaddrinfo
+_dns_pin = {}
+
+def _pinned_getaddrinfo(host, port, *args, **kwargs):
+    if host in _dns_pin:
+        return _orig_getaddrinfo(_dns_pin[host], port, *args, **kwargs)
+    return _orig_getaddrinfo(host, port, *args, **kwargs)
+
+socket.getaddrinfo = _pinned_getaddrinfo
+
 def is_safe_url(url):
-    """Allows only HTTP(S) destinations resolving to public IP addresses."""
+    """Allows only HTTP(S) destinations resolving to public IP addresses and pins the validated IP."""
     try:
         p = urllib.parse.urlparse(url)
         if p.scheme not in ('http', 'https') or not p.hostname:
             return False
-        for _, _, _, _, sockaddr in socket.getaddrinfo(p.hostname, None):
+        hostname = p.hostname.lower()
+        res = _orig_getaddrinfo(hostname, None)
+        valid_ips = []
+        for _, _, _, _, sockaddr in res:
             ip = ipaddress.ip_address(sockaddr[0])
             if not ip.is_global:
                 return False
+            valid_ips.append(sockaddr[0])
+        if not valid_ips:
+            return False
+        _dns_pin[hostname] = valid_ips[0]
         return True
     except Exception:
         return False
@@ -147,7 +164,8 @@ def passive_security_scan(url):
                 parts = directive.strip().split()
                 if parts and parts[0] == 'frame-ancestors':
                     vals = parts[1:]
-                    if vals and '*' not in vals:
+                    is_permissive = any(v == '*' or (v.endswith(':') and '//' not in v) for v in vals)
+                    if vals and not is_permissive:
                         has_frame_ancestors = True
                     break
             has_framing_protection = has_frame_ancestors or (xfo in ('DENY', 'SAMEORIGIN'))

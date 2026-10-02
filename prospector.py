@@ -86,11 +86,20 @@ def is_safe_url(url):
             return False
         for _, _, _, _, sockaddr in socket.getaddrinfo(p.hostname, None):
             ip = ipaddress.ip_address(sockaddr[0])
-            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+            if not ip.is_global:
                 return False
         return True
     except Exception:
         return False
+
+class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Ensures HTTP redirects cannot escape to non-global or invalid destinations."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not is_safe_url(newurl):
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+urllib.request.install_opener(urllib.request.build_opener(SafeRedirectHandler))
 
 def scrape_website(url):
     """Scrapes the homepage for an email address and raw text content."""
@@ -133,7 +142,15 @@ def passive_security_scan(url):
             if 'Strict-Transport-Security' not in headers:
                 missing.append("HSTS (HTTPS enforcement)")
             xfo = headers.get('X-Frame-Options', '').strip().upper()
-            has_framing_protection = ('frame-ancestors' in csp.lower()) or (xfo in ('DENY', 'SAMEORIGIN'))
+            has_frame_ancestors = False
+            for directive in csp.lower().split(';'):
+                parts = directive.strip().split()
+                if parts and parts[0] == 'frame-ancestors':
+                    vals = parts[1:]
+                    if vals and '*' not in vals:
+                        has_frame_ancestors = True
+                    break
+            has_framing_protection = has_frame_ancestors or (xfo in ('DENY', 'SAMEORIGIN'))
             if not has_framing_protection:
                 missing.append("Anti-Clickjacking (X-Frame-Options / frame-ancestors)")
             return missing

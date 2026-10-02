@@ -103,9 +103,10 @@ def scrape_website(url):
                 return None, ""
             html = response.read(100000).decode('utf-8', errors='ignore')
             
-            # Naive email regex
-            emails = list(set(re.findall(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', html)))
-            emails = [e for e in emails if not e.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp'))]
+            # Email extraction: prioritize mailto links and preserve document order
+            mailtos = re.findall(r'mailto:([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', html, re.I)
+            raw_emails = re.findall(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', html)
+            emails = [e for e in dict.fromkeys(mailtos + raw_emails) if not e.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp'))]
             
             # Naive text extraction
             text_content = re.sub('<[^<]+?>', ' ', html)

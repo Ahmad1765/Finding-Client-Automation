@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+scratch/
+ddg.txt
+test_groq_payload.py
+test_groq_models.py
+draft.txt

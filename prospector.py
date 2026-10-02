@@ -1,0 +1,201 @@
+# ponytail: Zero dependencies. Using stdlib urllib, json, smtplib, and regex to avoid bloated requests, beautifulsoup, or SDKs.
+# 1. Finds leads via Google Places
+# 2. Scrapes homepage for email & text
+# 3. Asks Gemini AI to write a personalized cold email
+# 4. Sends it via SMTP
+
+import urllib.request
+import urllib.parse
+import json
+import smtplib
+import re
+import os
+from email.message import EmailMessage
+
+# ==========================================
+# CONFIGURATION
+# ==========================================
+# GOOGLE_API_KEY is no longer needed! We are using OpenStreetMap (Overpass API) which is 100% free.
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "YOUR_GROQ_API_KEY")
+
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USER = os.environ.get("SMTP_USER", "your_email@gmail.com")
+SMTP_PASS = os.environ.get("SMTP_PASS", "your_app_password").replace(" ", "") # Strip spaces from app password
+
+def find_places_free(city, business_type):
+    """Finds businesses using the free Overpass API (OpenStreetMap). No API key required!"""
+    # Map common search terms to OSM tags
+    term = business_type.lower()
+    tag = f'name~"{term}",i' # Default to searching by name
+    if 'plumb' in term: tag = 'craft=plumber'
+    elif 'electric' in term: tag = 'craft=electrician'
+    elif 'restaurant' in term: tag = 'amenity=restaurant'
+    elif 'cafe' in term: tag = 'amenity=cafe'
+    elif 'dentist' in term: tag = 'amenity=dentist'
+    elif 'roof' in term: tag = 'craft=roofer'
+
+    query = f"""
+    [out:json];
+    area[name="{city}"]->.searchArea;
+    nwr[{tag}](area.searchArea);
+    out center;
+    """
+    
+    url = "https://overpass-api.de/api/interpreter"
+    data = urllib.parse.urlencode({'data': query}).encode('utf-8')
+    req = urllib.request.Request(url, data=data)
+    
+    try:
+        with urllib.request.urlopen(req) as response:
+            res = json.loads(response.read().decode('utf-8'))
+            places = []
+            for el in res.get('elements', []):
+                tags = el.get('tags', {})
+                if not tags.get('name'): continue
+                places.append({
+                    'name': tags.get('name'),
+                    'website': tags.get('website') or tags.get('contact:website'),
+                    'phone': tags.get('phone') or tags.get('contact:phone')
+                })
+            return places
+    except Exception as e:
+        print(f"Error fetching free places: {e}")
+        return []
+
+def scrape_website(url):
+    """Scrapes the homepage for an email address and raw text content."""
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=8) as response:
+            html = response.read().decode('utf-8', errors='ignore')
+            
+            # Naive email regex
+            emails = list(set(re.findall(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', html)))
+            emails = [e for e in emails if not e.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp'))]
+            
+            # Naive text extraction
+            text_content = re.sub('<[^<]+?>', ' ', html)
+            text_content = re.sub(r'\s+', ' ', text_content).strip()
+            
+            return emails[0] if emails else None, text_content[:2000]
+    except Exception as e:
+        print(f"  [!] Could not scrape {url}: {e}")
+        return None, ""
+
+def passive_security_scan(url):
+    """Passively checks a website for missing security headers (Legal and safe)."""
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            headers = response.headers
+            missing = []
+            if 'Content-Security-Policy' not in headers:
+                missing.append("CSP (Anti-XSS)")
+            if 'Strict-Transport-Security' not in headers:
+                missing.append("HSTS (HTTPS enforcement)")
+            if 'X-Frame-Options' not in headers:
+                missing.append("X-Frame-Options (Anti-Clickjacking)")
+            return missing
+    except Exception:
+        return []
+
+def generate_personalized_email(business_name, website_url, website_text, missing_security):
+    """Uses Groq API to write a personalized cold email based on website flaws and security risks."""
+    
+    security_prompt = ""
+    if missing_security:
+        security_prompt = f"CRITICAL: Their website is missing basic security protections: {', '.join(missing_security)}. They are vulnerable to attacks."
+
+    prompt = f"""
+    Write a short, casual cold email to {business_name}. 
+    Their website is {website_url}. Based on this text from their homepage: "{website_text}", 
+    they likely have an outdated or poorly optimized site.
+    {security_prompt}
+    Pitch a modern, SECURE website redesign. Keep it under 4 sentences. Sound human, not corporate.
+    """
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    payload = json.dumps({
+        "model": "openai/gpt-oss-20b",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7
+    }).encode('utf-8')
+    
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {GROQ_API_KEY}',
+        'User-Agent': 'Mozilla/5.0'
+    }
+    
+    try:
+        req = urllib.request.Request(url, data=payload, headers=headers)
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read())
+            return data['choices'][0]['message']['content'].strip()
+    except Exception as e:
+        print(f"Error calling Groq: {e}")
+        return f"Hey {business_name}, I noticed your website might need an update. Let's chat!"
+
+def send_email(to_email, subject, body):
+    """Sends the email using SMTP."""
+    msg = EmailMessage()
+    msg.set_content(body)
+    msg['Subject'] = subject
+    msg['From'] = SMTP_USER
+    msg['To'] = to_email
+
+    try:
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
+        print(f"  [+] Email sent to {to_email}")
+    except Exception as e:
+        print(f"  [!] Failed to send email to {to_email}: {e}")
+
+def main():
+    print("--- 100% Free Lead Generation ---")
+    city = input("Enter the city (e.g., 'Austin'): ").strip()
+    business_type = input("Enter the business type (e.g., 'plumber', 'dentist'): ").strip()
+    
+    print(f"\nSearching for '{business_type}' in '{city}' using OpenStreetMap (Free)...\n")
+    
+    places = find_places_free(city, business_type)
+    
+    if not places:
+        print("No places found. Try a larger city or a different business type.")
+        return
+
+    for place in places[:10]: # Limit to 10 for testing
+        name = place.get('name')
+        print(f"--- Processing: {name} ---")
+        
+        website = place.get('website')
+        phone = place.get('phone', 'N/A')
+        
+        if not website:
+            print(f"  [-] NO WEBSITE. (Phone: {phone})")
+            print(f"  [-] Since they have no website, an email address isn't publicly listed. Calling them is the best strategy.")
+            continue
+            
+        print(f"  [-] Website found: {website}. Scraping...")
+        target_email, website_text = scrape_website(website)
+        
+        missing_sec = passive_security_scan(website)
+        if missing_sec:
+            print(f"  [!] Security Vulnerabilities Found: {', '.join(missing_sec)}")
+            
+        if not target_email:
+            print(f"  [-] No email found on homepage.")
+            continue
+            
+        print(f"  [-] Found email: {target_email}. AI analyzing site...")
+        email_body = generate_personalized_email(name, website, website_text, missing_sec)
+        
+        print(f"  [DRAFT - NOT SENT]\n  To: {target_email}\n  Subject: Question about {name}\n  Body: {email_body}\n")
+        # To actually send, uncomment the line below:
+        # send_email(target_email, f"Question about {name}", email_body)
+
+if __name__ == "__main__":
+    main()

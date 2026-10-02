@@ -12,6 +12,7 @@ import re
 import os
 import socket
 import ipaddress
+import ssl
 from email.message import EmailMessage
 
 # ==========================================
@@ -185,8 +186,9 @@ def send_email(to_email, subject, body):
     msg['To'] = to_email
 
     try:
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()
+        context = ssl.create_default_context()
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15) as server:
+            server.starttls(context=context)
             server.login(SMTP_USER, SMTP_PASS)
             server.send_message(msg)
         print(f"  [+] Email sent to {to_email}")

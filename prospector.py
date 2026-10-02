@@ -126,12 +126,15 @@ def passive_security_scan(url):
         with urllib.request.urlopen(req, timeout=5) as response:
             headers = response.headers
             missing = []
-            if 'Content-Security-Policy' not in headers:
+            csp = headers.get('Content-Security-Policy', '')
+            if not csp:
                 missing.append("CSP (Anti-XSS)")
             if 'Strict-Transport-Security' not in headers:
                 missing.append("HSTS (HTTPS enforcement)")
-            if 'X-Frame-Options' not in headers:
-                missing.append("X-Frame-Options (Anti-Clickjacking)")
+            xfo = headers.get('X-Frame-Options', '').strip().upper()
+            has_framing_protection = ('frame-ancestors' in csp.lower()) or (xfo in ('DENY', 'SAMEORIGIN'))
+            if not has_framing_protection:
+                missing.append("Anti-Clickjacking (X-Frame-Options / frame-ancestors)")
             return missing
     except Exception:
         return []

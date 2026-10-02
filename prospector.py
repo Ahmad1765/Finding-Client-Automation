@@ -99,7 +99,9 @@ def scrape_website(url):
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=8) as response:
-            html = response.read().decode('utf-8', errors='ignore')
+            if response.headers.get_content_type() not in ('text/html', 'application/xhtml+xml', 'text/plain'):
+                return None, ""
+            html = response.read(100000).decode('utf-8', errors='ignore')
             
             # Naive email regex
             emails = list(set(re.findall(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', html)))

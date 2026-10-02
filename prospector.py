@@ -10,6 +10,8 @@ import json
 import smtplib
 import re
 import os
+import socket
+import ipaddress
 from email.message import EmailMessage
 
 # ==========================================
@@ -75,8 +77,25 @@ def find_places_free(city, business_type):
         print(f"Error fetching free places: {e}")
         return []
 
+def is_safe_url(url):
+    """Allows only HTTP(S) destinations resolving to public IP addresses."""
+    try:
+        p = urllib.parse.urlparse(url)
+        if p.scheme not in ('http', 'https') or not p.hostname:
+            return False
+        for _, _, _, _, sockaddr in socket.getaddrinfo(p.hostname, None):
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                return False
+        return True
+    except Exception:
+        return False
+
 def scrape_website(url):
     """Scrapes the homepage for an email address and raw text content."""
+    if not is_safe_url(url):
+        print(f"  [!] Skipped unsafe or invalid URL: {url}")
+        return None, ""
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=8) as response:
@@ -97,6 +116,8 @@ def scrape_website(url):
 
 def passive_security_scan(url):
     """Passively checks a website for missing security headers (Legal and safe)."""
+    if not is_safe_url(url):
+        return []
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=5) as response:
@@ -190,6 +211,9 @@ def main():
             print(f"  [-] NO WEBSITE. (Phone: {phone})")
             print(f"  [-] Since they have no website, an email address isn't publicly listed. Calling them is the best strategy.")
             continue
+
+        if "://" not in website:
+            website = f"https://{website}"
             
         print(f"  [-] Website found: {website}. Scraping...")
         target_email, website_text = scrape_website(website)

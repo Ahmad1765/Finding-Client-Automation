@@ -82,8 +82,9 @@ _orig_getaddrinfo = socket.getaddrinfo
 _dns_pin = {}
 
 def _pinned_getaddrinfo(host, port, *args, **kwargs):
-    if host in _dns_pin:
-        return _orig_getaddrinfo(_dns_pin[host], port, *args, **kwargs)
+    key = host.lower() if isinstance(host, str) else host
+    if key in _dns_pin:
+        return _orig_getaddrinfo(_dns_pin[key], port, *args, **kwargs)
     return _orig_getaddrinfo(host, port, *args, **kwargs)
 
 socket.getaddrinfo = _pinned_getaddrinfo
@@ -116,7 +117,10 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
             return None
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
-urllib.request.install_opener(urllib.request.build_opener(SafeRedirectHandler))
+# ponytail: ProxyHandler({}) disables env proxy so pinned IPs can't be bypassed via proxy settings
+urllib.request.install_opener(urllib.request.build_opener(
+    SafeRedirectHandler, urllib.request.ProxyHandler({})
+))
 
 def scrape_website(url):
     """Scrapes the homepage for an email address and raw text content."""
